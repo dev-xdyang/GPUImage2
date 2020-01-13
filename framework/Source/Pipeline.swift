@@ -1,31 +1,35 @@
 // MARK: -
+
 // MARK: Basic types
-import Foundation
+
 import Dispatch
+import Foundation
 
 public protocol ImageSource {
     var targets: TargetContainer { get }
     func transmitPreviousImage(to target: ImageConsumer, atIndex: UInt)
 }
 
-public protocol ImageConsumer:AnyObject {
+public protocol ImageConsumer: AnyObject {
     var maximumInputs: UInt { get }
     var sources: SourceContainer { get }
-    
+
     func newFramebufferAvailable(_ framebuffer: Framebuffer, fromSourceIndex: UInt)
 }
 
-public protocol ImageProcessingOperation: ImageConsumer, ImageSource { }
+public protocol ImageProcessingOperation: ImageConsumer, ImageSource {}
 
 // TODO: xdyang
-infix operator --> : AdditionPrecedence
-@discardableResult public func --><T:ImageConsumer>(source:ImageSource, destination:T) -> T {
+infix operator -->: AdditionPrecedence
+@discardableResult public func --> <T: ImageConsumer>(source: ImageSource, destination: T) -> T {
     source.addTarget(destination)
     return destination
 }
 
 // MARK: -
+
 // MARK: Extensions and supporting types
+
 public extension ImageSource {
     func addTarget(_ target: ImageConsumer, atTargetIndex: UInt? = nil) {
         if let targetIndex = atTargetIndex {
@@ -46,7 +50,7 @@ public extension ImageSource {
         }
         targets.removeAll()
     }
-    
+
     func updateTargetsWithFramebuffer(_ framebuffer: Framebuffer) {
         guard targets.isEmpty else {
             // Deal with the case where no targets are attached by immediately returning framebuffer to cache
@@ -68,7 +72,7 @@ public extension ImageConsumer {
     func addSource(_ source: ImageSource) -> UInt? {
         return sources.append(source, maximumInputs: maximumInputs)
     }
-    
+
     func setSource(_ source: ImageSource, atIndex: UInt) {
         _ = sources.insert(source, atIndex: atIndex, maximumInputs: maximumInputs)
     }
@@ -82,7 +86,7 @@ class WeakImageConsumer {
     weak var value: ImageConsumer?
     let indexAtTarget: UInt
 
-    init (value: ImageConsumer, indexAtTarget: UInt) {
+    init(value: ImageConsumer, indexAtTarget: UInt) {
         self.indexAtTarget = indexAtTarget
         self.value = value
     }
@@ -93,34 +97,34 @@ public class TargetContainer: Sequence {
     var count: Int { targets.count }
     var isEmpty: Bool { count <= 0 }
     let dispatchQueue = DispatchQueue(label: "com.sunsetlakesoftware.GPUImage.targetContainerQueue", attributes: [])
-    
+
     public func append(_ target: ImageConsumer, indexAtTarget: UInt) {
         // TODO: Don't allow the addition of a target more than once
         dispatchQueue.async {
-            self.targets.append(WeakImageConsumer(value:target, indexAtTarget:indexAtTarget))
+            self.targets.append(WeakImageConsumer(value: target, indexAtTarget: indexAtTarget))
         }
     }
-    
+
     public func makeIterator() -> AnyIterator<(UInt, ImageConsumer)> {
         var index = 0
-        
+
         return AnyIterator { () -> (UInt, ImageConsumer)? in
-            return self.dispatchQueue.sync {
+            self.dispatchQueue.sync {
                 guard index < self.targets.count else { return nil }
-                
+
                 while self.targets[index].value == nil {
-                    self.targets.remove(at:index)
+                    self.targets.remove(at: index)
                     if index >= self.targets.count {
                         return nil
                     }
                 }
-                
+
                 index += 1
                 return (self.targets[index - 1].indexAtTarget, self.targets[index - 1].value!)
-           }
+            }
         }
     }
-    
+
     public func removeAll() {
         dispatchQueue.async {
             self.targets.removeAll()
@@ -130,20 +134,20 @@ public class TargetContainer: Sequence {
 
 public class SourceContainer {
     var sources: [UInt: ImageSource] = [:]
-    
+
     public func append(_ source: ImageSource, maximumInputs: UInt) -> UInt? {
         var currentIndex: UInt = 0
         while currentIndex < maximumInputs {
-            if (sources[currentIndex] == nil) {
+            if sources[currentIndex] == nil {
                 sources[currentIndex] = source
                 return currentIndex
             }
             currentIndex += 1
         }
-        
+
         return nil
     }
-    
+
     public func insert(_ source: ImageSource, atIndex: UInt, maximumInputs: UInt) -> UInt {
         guard atIndex < maximumInputs else {
             fatalError("ERROR: Attempted to set a source beyond the maximum number of inputs on this operation")
@@ -151,25 +155,25 @@ public class SourceContainer {
         sources[atIndex] = source
         return atIndex
     }
-    
-    public func removeAtIndex(_ index:UInt) {
+
+    public func removeAtIndex(_ index: UInt) {
         sources[index] = nil
     }
 }
 
 public class ImageRelay: ImageProcessingOperation {
-    public var newImageCallback:((Framebuffer) -> ())?
-    
+    public var newImageCallback: ((Framebuffer) -> Void)?
+
     public let sources = SourceContainer()
     public let targets = TargetContainer()
     public let maximumInputs: UInt = 1
     public var preventRelay: Bool = false
-    
-    public func transmitPreviousImage(to target: ImageConsumer, atIndex: UInt) {
+
+    public func transmitPreviousImage(to _: ImageConsumer, atIndex _: UInt) {
         sources.sources[0]?.transmitPreviousImage(to: self, atIndex: 0)
     }
 
-    public func newFramebufferAvailable(_ framebuffer: Framebuffer, fromSourceIndex: UInt) {
+    public func newFramebufferAvailable(_ framebuffer: Framebuffer, fromSourceIndex _: UInt) {
         if let newImageCallback = newImageCallback {
             newImageCallback(framebuffer)
         }
@@ -177,7 +181,7 @@ public class ImageRelay: ImageProcessingOperation {
             relayFramebufferOnward(framebuffer)
         }
     }
-    
+
     public func relayFramebufferOnward(_ framebuffer: Framebuffer) {
         // Need to override to guarantee a removal of the previously applied lock
         for _ in targets {
